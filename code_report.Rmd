@@ -1,0 +1,420 @@
+---
+title: "Exploratory Time Series Analysis "
+author: "Inês Silva, Maria Miguel Ribeiro, Renatha Vieira"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# R and Packages
+```{r include=FALSE}
+library(astsa)
+library(fpp2)
+library(forecast)
+library(ggseas)
+library(ggplot2)
+library(tsibble)
+```
+
+
+### Read the data into R with the following script
+
+```{r}
+monthly_data <- read.csv(file.choose())
+head(monthly_data)
+```
+
+### Convert the data to time series
+
+```{r}
+mytimeseries <- ts(monthly_data[,-1], start=2006, end=2014, frequency=12)
+
+```
+
+### Construct time series plot
+
+```{r}
+autoplot(mytimeseries, facets=TRUE)
+```
+
+
+
+# Time plots and time series components
+
+
+We start by understanding the main components of a time series and how to best represent the data. 
+  
+```{r}
+str(mytimeseries)
+tsplot(mytimeseries, ylab="NUM_OCCURR", main="NYC crime rate from 2004 to 2014")
+```
+
+
+ 
+
+#Month plots of the time series
+
+```{r}
+ggmonthplot(mytimeseries)+
+  ylab("NUM_OCURR") +
+  ggtitle("Seasonal plot: number of crime occurencies per month ")
+```
+
+#Log Transformation of the data
+```{r}
+par(mfrow=c(2,1))
+autoplot((mytimeseries)) +
+  ggtitle("NYC crime occurrencies from 2006 to 2014") +
+  ylab("NUM_OCURR") +
+  xlab("CMPLNT_FR_DT")
+autoplot(log(mytimeseries)) +
+  ggtitle("Log NYC crime occurrencies from 2006 to 2014") +
+  ylab("log ($ CMPLNT_FR_DT)") +
+  xlab("NUM_OCURR")
+```
+
+
+#Performing Box-Cox  transformation in the data
+
+```{r}
+mytimeseries.lambda=BoxCox.lambda(mytimeseries)
+mytimeseries.lambda
+mytimeseries.BC=BoxCox(mytimeseries,lambda=mytimeseries.lambda)
+autoplot(mytimeseries.BC) +
+  ggtitle("Box-Cox NYC crime occurrencies from 2006 to 2014") +
+  ylab("NUM_OCURR") +
+  xlab("CMPLNT_FR_DT")
+```
+
+#Diferencing data and keep it in a variable for further use
+```{r}
+my_log_data <- log(mytimeseries)
+```
+
+#Lagplots of the time series
+```{r}
+lag1.plot(mytimeseries,12)
+lag1.plot(my_log_data,12)
+
+```
+# Notice that between lag 1 and lag 5 the correlation increases, than decreases until lag 12! This indicates a seasonal pattern in the data
+
+#Using a linear model to fit the trend
+```{r}
+summary(fit <- lm(my_log_data~time(my_log_data))) # regress NUM_OCURR on time
+```
+
+#Detrended data using a linear model aproach
+```{r}
+par(mfrow=c(2,1))
+tsplot(my_log_data, ylab="NUM_OCURR", col=3, lwd=2)
+abline(fit)           # add the fitted regression line to the plot
+tsplot(resid(fit), main="detrended")
+lag1.plot(resid(fit),12)
+```
+#Using a difference operator aproach to remove the trend
+
+Another approach is to filter the time series with the **difference operator**, $\nabla= 1-B$ where $B$ is the **lag operator** $B x_t=x_{t-1}$. So $$\nabla x_t = (1-B ) x_t =x_t -B x_{t} = x_t- x_{t-1}$$
+
+The resulting time series $y_t=\nabla x_t$ represents the increments or change of $x$ on consecutive time points. Take the number of occurencies, $x_t$. Then $y_t = x_t- x_{t-1}$ represents the monthly increase of price: from January to February, February to March, etc.
+
+```{r}
+par(mfrow=c(2,1))
+tsplot(my_log_data, ylab="NUM_OCURR", col=4, lwd=2)
+tsplot(diff(my_log_data), ylab="NUM_OCURR", col=4, lwd=2, main="Number crime of occurencies differenced")
+```
+
+#Representing the respective lagplots of detrended time series
+```{r}
+lag1.plot(diff((my_log_data)),12)
+```
+
+
+#Smoothing methods: estimating the trend
+
+```{r}
+w <- c(0.1, rep(1, 6), 0.5) / 6
+timeseries <- filter(my_log_data, sides = 2, filter = w)
+
+# Plot the original data with gray color
+plot(my_log_data, col = rgb(0.5, 0.6, 0.85, 0.9), ylim = c(0, 5), main = "Time Series Plot")
+
+# Add lines with different colors and adjusted line widths
+lines(timeseries, lwd = 2, col = "blue")  # Blue line for MA
+lines(ksmooth(time(my_log_data), my_log_data, "normal"), lwd = 2, col = "green")  # Green line for kernel smooth
+lines(lowess(my_log_data), lty = 1, lwd = 2, col = "orange")  # Orange line for Lowess
+
+# Add legend with corresponding colors and adjusted line widths
+legend(x = 2006, y = 50, legend = c("MA", "Kernel", "Lowess"), 
+       col = c("blue", "green", "orange"), lwd = 2, text.col = c(4, 3, 6))
+```
+
+
+
+#Lag plots of the time series using forecast
+```{r}
+gglagplot(my_log_data)
+gglagplot(diff(my_log_data))
+```
+
+#Removing trend and seasonality
+```{r}
+fit.times <- tslm(my_log_data ~ trend + season)
+summary(fit.times)
+```
+
+```{r}
+autoplot(my_log_data, series="Data") +
+  autolayer(fitted(fit.times), series="Fitted") +
+  xlab("CMPLNT_FR_DT") + ylab("NUM_OCURR") +
+  ggtitle("NYC  crime rate")
+tsplot(residuals(fit.times), main = "Residuals of NYC crime data")
+```
+ 
+
+
+#Using seasonal difference operator to remove the seasonality
+
+```{r}
+par(mfrow=c(2,1))
+tsplot(my_log_data)
+tsplot(diff(my_log_data,12))
+monthplot(diff(my_log_data,12))
+```
+```{r}
+diff_data_trend <- diff(my_log_data)
+diff_data_seasonal <- diff(my_log_data, 12)
+```
+
+#Representing the respective lag plots
+```{r}
+lag1.plot(diff_data_trend,12)
+lag1.plot(diff_data_seasonal,12)
+```
+#data com trend removida apresenta correlaçao negativa entre o lag 1 e o lag 12, ou seja entre um ano e outro
+ 
+
+
+
+#ACF e PACF of ts detrended and with ts deseasonalized
+````{r}
+acf(diff_data_trend, main = "Autocorrelation Function (ACF)of Detrended Time Series")
+
+acf(diff_data_seasonal, main = "Autocorrelation Function (ACF) of Deseasonalized Time Series")
+
+
+pacf(diff_data_trend, main = "Partial Autocorrelation Function (PACF) of Detrended Time Series ")
+pacf(diff_data_seasonal, main = "Partial Autocorrelation Function (PACF) of Deseasonalized Time Series")
+
+
+```
+#STL decompostion
+```{r}
+my_log_data.stlper=stl(my_log_data, s.window="periodic")
+my_log_data.stl=stl(my_log_data, s.window=12)
+plot(my_log_data.stlper)
+plot(my_log_data.stl)
+```
+```{r}
+trend_component <- my_log_data.stl$time.series[, "trend"]
+seasonal_component <- my_log_data.stl$time.series[, "seasonal"]
+residual_component <- my_log_data.stl$time.series[, "remainder"]
+```
+
+#Trend and Seasonal components
+```{r}
+lag1.plot(trend_component,12)
+lag1.plot(seasonal_component,12)
+```
+
+#The remainder behaviour
+
+```{r}
+lag1.plot(residual_component,12)
+autoplot(residual_component)
+```
+```{r}
+acf(residual_component, main = "Autocorrelation Function (ACF)of Residuals")
+
+pacf(residual_component, main = "Partial Autocorrelation Function (PACF) Residuals ")
+
+```
+
+
+
+#Augmented Dickie Fuller Test (ADF)
+
+```{r}
+#install.packages("tseries")
+library(tseries)
+result <- adf.test(my_log_data)
+print(result)
+```
+
+#Train test split using the original dataset withou no transformations or differentiations. The original data is saved in the variable 'my_log_data' which refers to the data with log transformation only
+
+```{r}
+library(forecast)
+
+
+y_train <- window(my_log_data, start = 2006, end=2012+6/12)
+y_test <- window(my_log_data, start= 2012+6/12, end = 2014)
+#Modelo ARIMA sazonal com dados de treino
+model_arima_sazonal <- auto.arima(y_train)
+summary(model_arima_sazonal)
+```
+```{r}
+model2 <- arima(y_train, order=c(2,1,2), seasonal=list(order=c(1,1,2), period=12))
+
+# Visualize o resumo do modelo
+summary(model2)
+
+```
+
+```{r}
+
+acf(y_train, main = "Autocorrelation Function (ACF) of Train set")
+
+
+pacf(y_train, main = "Partial Autocorrelation Function (PACF) of Train set")
+
+```
+
+```{r}
+myLB= function(x.fit){
+  res=NULL
+  npar= dim(x.fit$var.coef)[1]
+for (i in (npar+1):40){
+  q=Box.test(x.fit$residuals,lag=i,type="Ljung-Box",fitdf=npar)
+  res[i]=q$p.value}
+  return(res)}
+```
+
+#for ARIMA(0,1,2)(0,0,2)[12] 
+```{r}
+par(mfrow=c(2,2), mar=c(3,3,4,2))
+Acf(model_arima_sazonal$residuals, type='correlation', na.action=na.omit, ylab="", main=expression(paste("ACF for Residuals")))
+Acf(model_arima_sazonal$residuals, type='partial',  na.action=na.omit, ylab="", main=expression(paste("PACF Residuals")))
+plot(myLB(model_arima_sazonal),ylim=c(0,1))
+abline(h=0.05,col="blue",lty=2)
+```
+
+#for ARIMA(2,1,2)(1,1,2)[12] --> the choosen model that considers a AR component seasonal and not seasonal
+```{r}
+par(mfrow=c(2,2), mar=c(3,3,4,2))
+Acf(model2$residuals, type='correlation', na.action=na.omit, ylab="", main=expression(paste("ACF for Residuals")))
+Acf(model2$residuals, type='partial',  na.action=na.omit, ylab="", main=expression(paste("PACF Residuals")))
+plot(myLB(model2),ylim=c(0,1))
+abline(h=0.05,col="blue",lty=2)
+```
+
+```{r}
+# Fazer previsões para o conjunto de teste
+previsoes_teste <- forecast(model_arima_sazonal, h = length(y_test))
+previsoes_teste2 <- forecast(model2, h = length(y_test))
+
+# Plotar as previsões e os dados reais
+plot(previsoes_teste, main = "Previsões para o Conjunto de Teste", ylab = "Valores", xlab = "Períodos")
+
+plot(previsoes_teste2, main = "Previsões para o Conjunto de Teste", ylab = "Valores", xlab = "Períodos")
+```
+
+
+```{r}
+#resultados <- accuracy(previsoes_teste, y_test)
+resultados2 <- accuracy(previsoes_teste2, y_test)
+
+# Visualize as métricas de erro
+#print(resultados)
+print(resultados2)
+```
+
+```{r}
+par(mfrow=c(1,1), cex=0.7, mar=c(4,6,1,1))
+plot(previsoes_teste, xlim=c(2006,2014))
+lines(my_log_data)
+
+par(mfrow=c(1,1), cex=0.7, mar=c(4,6,1,1))
+plot(previsoes_teste2, xlim=c(2006,2014))
+lines(my_log_data)
+```
+
+#Now we build the confidence intervals
+```{r}
+intervalos_confianca <- c(previsoes_teste$lower, previsoes_teste$upper)
+
+# Visualizar os intervalos de confiança
+print(intervalos_confianca)
+plot(x = seq_along(previsoes_teste$mean), y = previsoes_teste$mean, type = "l",
+     main = "Intervalos de Confiança para Previsões no Set de Teste",
+     ylab = "Valores", xlab = "Períodos", ylim = range(c(previsoes_teste$lower, previsoes_teste$upper)))
+
+# Adicionar intervalos de confiança como linhas pontilhadas
+lines(x = seq_along(previsoes_teste$mean), y = previsoes_teste$lower[,1], col = "red", lty = 2)
+lines(x = seq_along(previsoes_teste$mean), y = previsoes_teste$upper[,1], col = "red", lty = 2)
+
+# Adicionar legenda
+legend("topright", legend = c("Previsões", "Intervalo de Confiança"), col = c("black", "red"), lty = c(1, 2))
+
+```
+
+```{r}
+
+intervalos_confianca2 <- c(previsoes_teste2$lower, previsoes_teste2$upper)
+
+# Visualizar os intervalos de confiança
+print(intervalos_confianca2)
+plot(x = seq_along(previsoes_teste2$mean), y = previsoes_teste2$mean, type = "l",
+     main = "Intervalos de Confiança para Previsões no Set de Teste",
+     ylab = "Valores", xlab = "Períodos", ylim = range(c(previsoes_teste$lower, previsoes_teste$upper)))
+
+# Adicionar intervalos de confiança como linhas pontilhadas
+lines(x = seq_along(previsoes_teste2$mean), y = previsoes_teste2$lower[,1], col = "red", lty = 2)
+lines(x = seq_along(previsoes_teste2$mean), y = previsoes_teste2$upper[,1], col = "red", lty = 2)
+
+# Adicionar legenda
+legend("topright", legend = c("Previsões", "Intervalo de Confiança"), col = c("black", "red"), lty = c(1, 2))
+```
+
+```{r}
+# Selecionar os limites inferior e superior dos intervalos de confiança
+limites_inferiores <- previsoes_teste$lower
+limites_superiores <- previsoes_teste$upper
+
+# Calcular a amplitude de cada intervalo de confiança
+amplitude_intervalos <- limites_superiores - limites_inferiores
+
+# Calcular a média e desvio padrão das amplitudes
+media_amplitude <- mean(amplitude_intervalos)
+desvio_padrao_amplitude <- sd(amplitude_intervalos)
+
+# Imprima os resultados
+print("Média da amplitude dos intervalos de confiança:")
+print(media_amplitude)
+print("Desvio padrão da amplitude dos intervalos de confiança:")
+print(desvio_padrao_amplitude)
+```
+
+
+```{r}
+# Selecionar os limites inferior e superior dos intervalos de confiança
+limites_inferiores2 <- previsoes_teste2$lower
+limites_superiores2 <- previsoes_teste2$upper
+
+# Calcular a amplitude de cada intervalo de confiança
+amplitude_intervalos2 <- limites_superiores2 - limites_inferiores2
+
+# Calcular a média e desvio padrão das amplitudes
+media_amplitude2 <- mean(amplitude_intervalos2)
+desvio_padrao_amplitude2 <- sd(amplitude_intervalos2)
+
+# Imprimir os resultados
+print("Média da amplitude dos intervalos de confiança:")
+print(media_amplitude2)
+print("Desvio padrão da amplitude dos intervalos de confiança:")
+print(desvio_padrao_amplitude2)
+```
